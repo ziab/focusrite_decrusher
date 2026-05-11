@@ -44,3 +44,13 @@ Because this application utilizes the internal ControlServer protocol, it contai
 2. Open the official **Focusrite Control** desktop application.
 3. Navigate to the settings and approve the new client named **"De-Crusher"**.
 4. The application will now silently manage audio synchronization in the background.
+---
+
+## 4. Building from Source
+
+This project requires **CMake** and **Visual Studio / MSVC**.
+
+1. Clone the repository.
+2. Double-click the \uild.bat\ file.
+3. The compiled standalone executable will be generated at \uild\Release\DeCrusher.exe\.
+
