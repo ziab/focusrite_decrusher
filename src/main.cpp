@@ -3,6 +3,8 @@
 #include <thread>
 #include <atomic>
 #include <stdio.h>
+#include <stdarg.h>
+#include "resource.h"
 #include "AudioReset.h"
 
 bool g_LoggingEnabled = false;
@@ -38,7 +40,7 @@ void AddTrayIcon(HWND hwnd) {
     nid.uID = ID_TRAY_APP_ICON;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_TRAYICON;
-    nid.hIcon = LoadIcon(NULL, IDI_APPLICATION); // Default icon
+    nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APP_ICON));
     wcscpy_s(nid.szTip, L"De-Crusher (Focusrite Auto-Reset)");
     Shell_NotifyIcon(NIM_ADD, &nid);
     Log("Tray icon added.");
