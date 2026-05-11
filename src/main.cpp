@@ -99,7 +99,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (pbs->PowerSetting == GUID_MONITOR_POWER_ON && pbs->DataLength == sizeof(DWORD)) {
                     DWORD monitorState = *(DWORD*)pbs->Data;
                     Log("WindowProc: WM_POWERBROADCAST GUID_MONITOR_POWER_ON state=%u", monitorState);
-                    if (monitorState == 0) {
+                    if (monitorState == 0 || monitorState == 1) {
                         PerformDecrush();
                     }
                 }
