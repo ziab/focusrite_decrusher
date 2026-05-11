@@ -51,6 +51,5 @@ Because this application utilizes the internal ControlServer protocol, it contai
 This project requires **CMake** and **Visual Studio / MSVC**.
 
 1. Clone the repository.
-2. Double-click the \uild.bat\ file.
-3. The compiled standalone executable will be generated at \uild\Release\DeCrusher.exe\.
-
+2. Double-click the `build.bat` file.
+3. The compiled standalone executable will be generated at `build\Release\DeCrusher.exe`.
