@@ -2,7 +2,7 @@
 
 ## 1. Background & Context
 
-Many audio professionals and hobbyists leave their workstations and ASIO hosts running 24/7. However, a common issue arises with **Focusrite Scarlett** interfaces (and potentially others) during Windows power state transitions.
+Many audio professionals and hobbyists (specifically e-kit drummers) leave their workstations and ASIO hosts running 24/7. However, a common issue arises with **Focusrite Scarlett** interfaces (and potentially others) during Windows power state transitions.
 
 * **The Conflict:** When the Windows display turns off or enters sleep, a Power State change (D3) is broadcast over the PCIe bus. This frequently triggers a DPC latency spike that desynchronizes the Focusrite hardware clock from the active ASIO stream.
 * **The Symptoms:** Audio becomes "robotic," "decimated," or "bit-crushed." This affects system-wide audio and, critically, low-latency ASIO outputs, persisting until a manual hardware reset occurs.
@@ -42,7 +42,9 @@ The successful solution requires bypassing Windows Audio entirely and speaking d
 Because this application utilizes the internal ControlServer protocol, it contains a security authorization step:
 1. Run `DeCrusher.exe`.
 2. Open the official **Focusrite Control** desktop application.
-3. Navigate to the settings and approve the new client named **"De-Crusher"**.
+3. Navigate to the settings (gear icon) and click **Approve** next to the new client named **"De-Crusher"** under Remote Devices.
+   
+   ![Focusrite Control Remote Devices Approval](approval.png)
 4. The application will now silently manage audio synchronization in the background.
 ---
 
