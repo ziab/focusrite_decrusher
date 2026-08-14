@@ -8,6 +8,8 @@ add_executable(DeCrusher WIN32
     src/main.cpp
     src/AudioReset.cpp
     src/AudioReset.h
+    src/FC2HttpClient.cpp
+    src/FC2HttpClient.h
     src/resources.rc
 )
 
@@ -22,4 +24,6 @@ target_link_libraries(DeCrusher PRIVATE
     propsys
     ws2_32
     iphlpapi
+    winhttp
+    dnsapi
 )
