@@ -25,6 +25,7 @@ void Log(const char* format, ...) {
 }
 
 #define WM_TRAYICON (WM_USER + 1)
+#define WM_DECRUSH_RESULT (WM_APP + 1)
 #define ID_TRAY_APP_ICON                1001
 #define ID_TRAY_EXIT                    1002
 #define ID_TRAY_MANUAL_DECRUSH          1003
@@ -32,6 +33,16 @@ void Log(const char* format, ...) {
 NOTIFYICONDATA nid = {};
 HWND hWnd;
 HPOWERNOTIFY hPowerNotify = NULL;
+
+void ShowTrayNotification(const wchar_t* title, const wchar_t* msg, DWORD dwInfoFlags) {
+    nid.uFlags |= NIF_INFO;
+    nid.dwInfoFlags = dwInfoFlags;
+    wcscpy_s(nid.szInfoTitle, title);
+    wcscpy_s(nid.szInfo, msg);
+    // Use large icon version to ensure balloon shows on Win10/11
+    Shell_NotifyIcon(NIM_MODIFY, &nid);
+    Log("Notification shown: %ls - %ls", title, msg);
+}
 
 void AddTrayIcon(HWND hwnd) {
     memset(&nid, 0, sizeof(NOTIFYICONDATA));
@@ -43,6 +54,15 @@ void AddTrayIcon(HWND hwnd) {
     nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APP_ICON));
     wcscpy_s(nid.szTip, L"De-Crusher (Focusrite Auto-Reset)");
     Shell_NotifyIcon(NIM_ADD, &nid);
+    // Request balloon-capable version. Use a clean struct for NIM_SETVERSION
+    // and keep legacy WM_RBUTTONUP behavior (NOTIFYICON_VERSION == 3). VERSION_4
+    // changes lParam to WM_CONTEXTMENU and breaks the menu if not handled.
+    NOTIFYICONDATA ver = {};
+    ver.cbSize = sizeof(NOTIFYICONDATA);
+    ver.hWnd = hwnd;
+    ver.uID = ID_TRAY_APP_ICON;
+    ver.uVersion = NOTIFYICON_VERSION; // 3, keeps WM_RBUTTONUP / WM_LBUTTONUP
+    Shell_NotifyIcon(NIM_SETVERSION, &ver);
     Log("Tray icon added.");
 }
 
@@ -69,14 +89,23 @@ void PerformDecrush() {
         Log("PerformDecrush: Monitor off detected. Waiting 5 seconds...");
         Sleep(5000);
         Log("PerformDecrush: 5 seconds elapsed. Firing audio reset.");
-        ReclockFocusriteDevice();
+        bool ok = ReclockFocusriteDevice();
+        // Marshal result to UI thread for balloon (thread-safe). wParam=success, lParam=0=auto
+        PostMessage(hWnd, WM_DECRUSH_RESULT, (WPARAM)ok, (LPARAM)0);
+        if (!ok) {
+            Log("PerformDecrush: Audio reset failed - notification posted.");
+        } else {
+            Log("PerformDecrush: Audio reset succeeded.");
+        }
     }).detach();
 }
 
 void PerformManualDecrush() {
     std::thread([]() {
         Log("PerformManualDecrush: Manual trigger invoked.");
-        ReclockFocusriteDevice();
+        bool ok = ReclockFocusriteDevice();
+        // wParam=success, lParam=1=manual
+        PostMessage(hWnd, WM_DECRUSH_RESULT, (WPARAM)ok, (LPARAM)1);
     }).detach();
 }
 
@@ -107,10 +136,33 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             break;
 
         case WM_TRAYICON:
-            if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP) {
+            // With NOTIFYICON_VERSION, lParam is WM_RBUTTONUP/WM_LBUTTONUP.
+            // With NOTIFYICON_VERSION_4, system sends WM_CONTEXTMENU/NIN_SELECT.
+            // Handle all variants and also LOWORD(lParam) for version-4 packing.
+            if (lParam == WM_RBUTTONUP || lParam == WM_LBUTTONUP || lParam == WM_CONTEXTMENU ||
+                lParam == NIN_SELECT || lParam == NIN_KEYSELECT ||
+                LOWORD(lParam) == WM_RBUTTONUP || LOWORD(lParam) == WM_CONTEXTMENU) {
                 ShowContextMenu(hwnd);
             }
             break;
+
+        case WM_DECRUSH_RESULT: {
+            bool ok = (bool)wParam;
+            bool isManual = (bool)lParam;
+            if (!ok) {
+                if (isManual) {
+                    ShowTrayNotification(L"De-Crusher Failed", L"Manual de-crush failed. Is Focusrite Control running and approved?", NIIF_ERROR);
+                } else {
+                    ShowTrayNotification(L"De-Crusher Failed", L"Audio reset failed. Check Focusrite Control approval or restart ControlServer. Run with -logs for details.", NIIF_ERROR);
+                }
+            } else {
+                if (isManual) {
+                    ShowTrayNotification(L"De-Crusher", L"Manual de-crush succeeded.", NIIF_INFO);
+                }
+                // Auto success is silent to avoid spam on every monitor off/on; log only.
+            }
+            break;
+        }
 
         case WM_COMMAND:
             if (LOWORD(wParam) == ID_TRAY_EXIT) {
