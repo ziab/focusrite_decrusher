@@ -11,25 +11,22 @@ Many audio professionals and hobbyists (specifically e-kit drummers) leave their
 
 ---
 
-## 2. Technical Architecture & The "Strategy C" Solution (Focusrite Control 2)
+## 2. Technical Architecture - Scarlett 6i6 Gen2 (Sample-Rate Only, No Driver Restart)
 
-Initial attempts to automate this by manipulating the Windows Core Audio `PKEY_AudioEngine_DeviceFormat` property failed. Because the ASIO host holds an exclusive hardware lock, the Focusrite driver ignores WDM-level sample rate changes.
+Initial attempts to automate this by manipulating the Windows Core Audio `PKEY_AudioEngine_DeviceFormat` property failed. Because the ASIO host holds an exclusive hardware lock, the Focusrite driver ignores WDM-level sample rate changes. `SetupDi` `DICS_DISABLE/ENABLE` device restart was tested but crashes `Superior Drummer 3` (tears `Focusrite USB Audio` stream `DevInst 9/54`).
 
-**Focusrite Control 1** used a local `ControlServer.exe` TCP/XML protocol (`<client-details>` / `<set id="905">` sample-rate flip on `127.0.0.1` ephemeral port discovered via `GetExtendedTcpTable`). **Focusrite Control 2** removed that server; the desktop app now exposes the **phone-app channel**: Bonjour `_ocaws._tcp.local` advertising an onboarding + secure WebSocket (`AES70/OCP.1` over `X25519` + `XChaCha20-Poly1305` `secretstream`, `sharedRx` per `v1.1081`, see `alexanderdalesio/focusrite-control-2-api` `docs/PROTOCOL.md`).
-
-This build is **V2-only** (no Control 1 fallback). It reuses the tested sidecar at `http://127.0.0.1:41780` instead of reimplementing the crypto in C++.
+The working fix for **Scarlett 6i6 Gen2** is **Focusrite Control 1** `ControlServer.exe` TCP/XML sample-rate flip (no driver restart, SD3-safe):
 
 ### Core Components
 1.  **Monitor State Detection:** 
     * A lightweight Win32 Tray Application uses `RegisterPowerSettingNotification` with `GUID_MONITOR_POWER_ON`.
     * It processes `WM_POWERBROADCAST` to detect when the monitor turns off.
     * Implements a 5-second sleep/timer after the "Off" event to allow the GPU and PCIe bus to settle into their idle power states before executing the audio reset.
-2.  **Focusrite Control 2 Discovery & Pairing (phone-app):**
-    * FC2 advertises `_ocaws._tcp.local` via Bonjour/DNS-SD (`dns-sd -B _ocaws._tcp local.`, `dns-sd -L <instance> _ocaws._tcp local.`). TXT `serverPublicKey` (64-hex) + dynamic `securePort`/`onboardingPort` (defaults `58322`/`58323` but ephemeral).
-    * Sidecar handles `X25519` identity (`%APPDATA%\focusrite-control-2-api\client-key.json`), `crypto_box_easy` approval payload, and QR verification (`focusrite pair` - approve in FC2 UI, screenshot QR). See `pair.js`/`secure-transport.js`.
-3.  **Re-clock via Sidecar HTTP API:**
-    * DeCrusher `src/FC2HttpClient.cpp` uses `WinHTTP` `POST http://127.0.0.1:41780/api/v1/batch` `{"operations":[{"control":"dim","value":true},{"control":"dim","value":false}]}` (`monitor-mute`/`monitor-gain` also available - `controls.js` objectNumbers `4117`/`4116`/`4118`). Two AES70 writes force the control path and re-sync the hardware (FC2 does not expose sample-rate; dim/mute toggle is used as the V2 analogue of the old `905` flip). Verified via `GET /api/v1/health`.
-    * Alternative for full `FCP` routing/mixer/sample-rate via direct USB (`focusrite backend usb`, requires FC2 **closed** - exclusive `libusb` vendor interface, `fcp-protocol.js` opcodes `0x80000c` device-map) is documented but not bundled in this V2 WinHTTP build.
+2.  **Dynamic Port Discovery (6i6 Gen2):**
+    * `Focusrite Control` background service (`ControlServer.exe`) listens on `127.0.0.1` ephemeral port.
+    * `GetExtendedTcpTable` + `CreateToolhelp32Snapshot` locates `PID`/`port`, filtered for `127.0.0.1` loopback.
+3.  **TCP/XML Sample-Rate Flip:**
+    * `WinSock2` `Length=%06zx` framed `<client-details>` handshake (approve `De-Crusher` in `Focusrite Control` Remote Devices), `<device-subscribe devid="1">`, then `<set devid="1"><item id="905" value="48 kHz"/></set>` `2000ms PLL` `<item id="905" value="44.1 kHz"/>` with `select`/`recv` ACK. `src/LegacyControlServer.cpp:30` handles `SendAll` partials and `WaitForServerResponse` - no `DICS_*`, no `WinUSB` hub cycle.
 4.  **Tray UI & Utilities:**
     * Standard `Shell_NotifyIcon` for background operation.
     * Provides a right-click context menu for "Manual De-Crush" and an option to enable verbose `-logs` via a spawned console window for troubleshooting.
@@ -37,23 +34,14 @@ This build is **V2-only** (no Control 1 fallback). It reuses the tested sidecar 
 
 ---
 
-## 3. Usage & Setup (Focusrite Control 2)
+## 3. Usage & Setup (Scarlett 6i6 Gen2)
 
-This V2 build requires the FC2 sidecar (`alexanderdalesio/focusrite-control-2-api`):
+1. Install **Focusrite Control** (v1, for 6i6 Gen2 - not Control 2) and keep `ControlServer.exe` running
+2. Run `build\Release\DeCrusher.exe` -> open `Focusrite Control` -> **Approve** `De-Crusher` in gear -> Remote Devices
 
-1. Install Node.js 20+ and the sidecar: `npm install -g focusrite-control-2-api`
-2. Pair once with the desktop app:
-   ```bat
-   focusrite backend fc2
-   dns-sd -B _ocaws._tcp local.
-   dns-sd -L <INSTANCE> _ocaws._tcp local.
-   focusrite config set serverPublicKey <64-hex from TXT>
-   focusrite pair   :: approve in Focusrite Control 2 when prompted, then drag QR PNG screenshot
-   ```
-3. Keep the sidecar running: `focusrite api` (listens `127.0.0.1:41780`, verify `curl http://127.0.0.1:41780/api/v1/health`)
-4. Run `DeCrusher.exe` (tray icon, `-logs` for verbose). On monitor off (5s delay) or **Manual De-Crush** it `POST /api/v1/batch` `dim` toggle via `WinHTTP`; failures show balloon `NIIF_ERROR` and log.
-   
-   Legacy Control 1 `approval.png` / `ControlServer.exe` flow is removed in V2.
+   ![Focusrite Control Remote Devices Approval](approval.png)
+
+3. Keep `DeCrusher` in tray (no admin needed - sample-rate flip, no driver restart, SD3-safe). Use `-logs` for verbose: `DeCrusher.exe -logs`. On monitor off (5s) or **Manual De-Crush** it flips `48kHz` `2s` `44.1kHz` via `ControlServer`; failures show balloon `NIIF_ERROR`.
 ---
 
 ## 4. Building from Source
