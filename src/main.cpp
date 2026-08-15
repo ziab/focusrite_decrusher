@@ -151,9 +151,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             bool isManual = (bool)lParam;
             if (!ok) {
                 if (isManual) {
-                    ShowTrayNotification(L"De-Crusher Failed", L"Manual de-crush failed. Is Focusrite Control running and approved?", NIIF_ERROR);
+                    ShowTrayNotification(L"De-Crusher Failed", L"Manual de-crush failed. Ensure Focusrite Scarlett device is connected.", NIIF_ERROR);
                 } else {
-                    ShowTrayNotification(L"De-Crusher Failed", L"Audio reset failed. Check Focusrite Control approval or restart ControlServer. Run with -logs for details.", NIIF_ERROR);
+                    ShowTrayNotification(L"De-Crusher Failed", L"Audio reset failed. Ensure Scarlett device is connected. Run with -logs for details.", NIIF_ERROR);
                 }
             } else {
                 if (isManual) {

@@ -1,19 +1,23 @@
 #include "AudioReset.h"
-#include "LegacyControlServer.h"
-#include <thread>
-#include <chrono>
+#include "PalReset.h"
+#include "FcpReset.h"
 
-// Scarlett 6i6 Gen2 only - sample-rate flip via ControlServer, no driver restart (SD3 safe).
+// Scarlett 6i6 Gen2 - sample-rate flip via Driver PAL (FocusritePal64.dll) / Direct USB FCP (SD3 safe).
 
 bool ReclockFocusriteDevice() {
-    Log("ReclockFocusriteDevice (6i6 Gen2): Starting sample-rate flip 48<->44.1kHz...");
+    Log("ReclockFocusriteDevice: Starting sample-rate flip 48<->44.1kHz (no driver restart)...");
 
-    if (ReclockViaLegacyControlServer()) {
-        Log("ReclockFocusriteDevice: Legacy sample-rate flip succeeded (PLL re-locked, no driver restart)");
+    if (ReclockViaFocusritePal()) {
+        Log("ReclockFocusriteDevice: Driver PAL sample-rate flip succeeded (PLL re-locked)");
         return true;
     }
 
-    Log("ReclockFocusriteDevice: ControlServer.exe not found");
-    Log("Hint: run Focusrite Control (v1 for 6i6 Gen2, not Control 2), approve De-Crusher in Remote Devices");
+    Log("Driver PAL reset not available, falling back to direct USB FCP...");
+    if (ReclockViaFcpSampleRate()) {
+        Log("ReclockFocusriteDevice: FCP sample-rate flip succeeded (direct USB, PLL re-locked)");
+        return true;
+    }
+
+    Log("ReclockFocusriteDevice: All sample-rate reset mechanisms failed.");
     return false;
 }

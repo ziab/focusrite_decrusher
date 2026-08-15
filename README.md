@@ -11,37 +11,39 @@ Many audio professionals and hobbyists (specifically e-kit drummers) leave their
 
 ---
 
-## 2. Technical Architecture - Scarlett 6i6 Gen2 (Sample-Rate Only, No Driver Restart)
+## 2. Technical Architecture - Driver PAL (Sample-Rate Only, No Driver Restart)
 
 Initial attempts to automate this by manipulating the Windows Core Audio `PKEY_AudioEngine_DeviceFormat` property failed. Because the ASIO host holds an exclusive hardware lock, the Focusrite driver ignores WDM-level sample rate changes. `SetupDi` `DICS_DISABLE/ENABLE` device restart was tested but crashes `Superior Drummer 3` (tears `Focusrite USB Audio` stream `DevInst 9/54`).
 
-The working fix for **Scarlett 6i6 Gen2** is **Focusrite Control 1** `ControlServer.exe` TCP/XML sample-rate flip (no driver restart, SD3-safe):
+The working fix uses Focusrite's official **Platform Abstraction Layer (`FocusritePal64.dll`)** to execute a driver-level sample-rate flip (`48kHz` $\rightarrow$ `2000ms PLL` $\rightarrow$ `44.1kHz`):
 
 ### Core Components
-1.  **Monitor State Detection:** 
-    * A lightweight Win32 Tray Application uses `RegisterPowerSettingNotification` with `GUID_MONITOR_POWER_ON`.
-    * It processes `WM_POWERBROADCAST` to detect when the monitor turns off.
-    * Implements a 5-second sleep/timer after the "Off" event to allow the GPU and PCIe bus to settle into their idle power states before executing the audio reset.
-2.  **Dynamic Port Discovery (6i6 Gen2):**
-    * `Focusrite Control` background service (`ControlServer.exe`) listens on `127.0.0.1` ephemeral port.
-    * `GetExtendedTcpTable` + `CreateToolhelp32Snapshot` locates `PID`/`port`, filtered for `127.0.0.1` loopback.
-3.  **TCP/XML Sample-Rate Flip:**
-    * `WinSock2` `Length=%06zx` framed `<client-details>` handshake (approve `De-Crusher` in `Focusrite Control` Remote Devices), `<device-subscribe devid="1">`, then `<set devid="1"><item id="905" value="48 kHz"/></set>` `2000ms PLL` `<item id="905" value="44.1 kHz"/>` with `select`/`recv` ACK. `src/LegacyControlServer.cpp:30` handles `SendAll` partials and `WaitForServerResponse` - no `DICS_*`, no `WinUSB` hub cycle.
-4.  **Tray UI & Utilities:**
-    * Standard `Shell_NotifyIcon` for background operation.
-    * Provides a right-click context menu for "Manual De-Crush" and an option to enable verbose `-logs` via a spawned console window for troubleshooting.
-    * Runs at `ABOVE_NORMAL_PRIORITY_CLASS` to prevent throttling during system idle transitions.
+1. **Monitor State Detection:** 
+   * A lightweight Win32 Tray Application uses `RegisterPowerSettingNotification` with `GUID_MONITOR_POWER_ON`.
+   * Processes `WM_POWERBROADCAST` to detect when the monitor turns off (or on).
+   * Implements a 5-second settle timer after the "Off" event to allow the GPU and PCIe bus to settle into their idle power states before executing the audio reset.
+2. **Driver PAL Re-clocking (`src/PalReset.cpp`):**
+   * Dynamically hooks `FocusritePal64.dll` (installed in `C:\Windows\System32` with the official Focusrite USB driver).
+   * Communicates directly through the Focusrite kernel driver stack (`\Driver\FocusriteUsb`) via internal root IOCTLs.
+   * Discovers connected Scarlett interfaces (`PID 0x8203` 6i6 Gen2 and others), reads current hardware clock, and triggers hardware PLL re-lock without restarting the audio driver or disrupting active ASIO sessions (SD3 safe).
+   * Fully compatible with **Focusrite Control 2** and driver v4.150+.
+3. **Direct USB FCP Fallback (`src/FcpReset.cpp`):**
+   * Fallback implementation communicating via Focusrite Control Protocol (FCP) over USB Control Transfers for low-level direct access.
+4. **Tray UI & Utilities (`src/main.cpp`):**
+   * Standard `Shell_NotifyIcon` for background operation.
+   * Right-click context menu for "Manual De-Crush" and Exit.
+   * Spawned console window for verbose troubleshooting via `DeCrusher.exe -logs`.
+   * Runs at `ABOVE_NORMAL_PRIORITY_CLASS` to prevent CPU throttling during idle transitions.
 
 ---
 
-## 3. Usage & Setup (Scarlett 6i6 Gen2)
+## 3. Usage & Setup
 
-1. Install **Focusrite Control** (v1, for 6i6 Gen2 - not Control 2) and keep `ControlServer.exe` running
-2. Run `build\Release\DeCrusher.exe` -> open `Focusrite Control` -> **Approve** `De-Crusher` in gear -> Remote Devices
+1. Run `build\Release\DeCrusher.exe` (or launch with `DeCrusher.exe -logs` for debug logging).
+2. De-Crusher runs in the background system tray (no administrator privileges or UI approvals required).
+3. When your monitor turns off, De-Crusher waits 5 seconds for PCIe power states to settle and flips the sample rate directly through the driver without interrupting active ASIO host streams.
+4. You can also trigger an immediate reset anytime via right-click $\rightarrow$ **Manual De-Crush**.
 
-   ![Focusrite Control Remote Devices Approval](approval.png)
-
-3. Keep `DeCrusher` in tray (no admin needed - sample-rate flip, no driver restart, SD3-safe). Use `-logs` for verbose: `DeCrusher.exe -logs`. On monitor off (5s) or **Manual De-Crush** it flips `48kHz` `2s` `44.1kHz` via `ControlServer`; failures show balloon `NIIF_ERROR`.
 ---
 
 ## 4. Building from Source
@@ -49,5 +51,5 @@ The working fix for **Scarlett 6i6 Gen2** is **Focusrite Control 1** `ControlSer
 This project requires **CMake** and **Visual Studio / MSVC**.
 
 1. Clone the repository.
-2. Double-click the `build.bat` file.
-3. The compiled standalone executable will be generated at `build\Release\DeCrusher.exe`.
+2. Run `build.bat` (or `cmake --build build --config Release`).
+3. The compiled standalone executable is generated at `build\Release\DeCrusher.exe`.

@@ -2,14 +2,16 @@ cmake_minimum_required(VERSION 3.15)
 project(DeCrusher)
 
 set(CMAKE_CXX_STANDARD 17)
-add_compile_definitions(UNICODE _UNICODE _WINSOCK_DEPRECATED_NO_WARNINGS)
+add_compile_definitions(UNICODE _UNICODE _WINSOCK_DEPRECATED_NO_WARNINGS NOMINMAX)
 
 add_executable(DeCrusher WIN32
     src/main.cpp
     src/AudioReset.cpp
     src/AudioReset.h
-    src/LegacyControlServer.cpp
-    src/LegacyControlServer.h
+    src/PalReset.cpp
+    src/PalReset.h
+    src/FcpReset.cpp
+    src/FcpReset.h
     src/resources.rc
 )
 
@@ -24,4 +26,9 @@ target_link_libraries(DeCrusher PRIVATE
     propsys
     ws2_32
     iphlpapi
+    setupapi
+    winusb
+    cabinet
+    crypt32
 )
+
