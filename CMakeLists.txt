@@ -32,3 +32,4 @@ target_link_libraries(DeCrusher PRIVATE
     crypt32
 )
 
+

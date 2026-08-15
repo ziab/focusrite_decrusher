@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include "resource.h"
 #include "AudioReset.h"
+#include "PalReset.h"
 
 bool g_LoggingEnabled = false;
 
@@ -114,6 +115,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_CREATE:
             Log("WindowProc: WM_CREATE received.");
             AddTrayIcon(hwnd);
+            InitializePal();
             hPowerNotify = RegisterPowerSettingNotification(hwnd, &GUID_MONITOR_POWER_ON, DEVICE_NOTIFY_WINDOW_HANDLE);
             if (hPowerNotify) {
                 Log("WindowProc: Registered for monitor power notifications.");

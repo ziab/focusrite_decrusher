@@ -2,6 +2,7 @@
 #include "AudioReset.h"
 #include <windows.h>
 #include <stdint.h>
+#include <atomic>
 #include <thread>
 #include <chrono>
 
@@ -30,99 +31,100 @@ namespace Pal {
         }
         virtual void deviceRemoved(void* devRaw) {
             Log("Pal::SystemDelegate: deviceRemoved");
+            detectedDevicePtr = nullptr;
+            ready = false;
         }
         virtual bool supportsUsb() { return true; }
         virtual bool supportsUsbDevice(unsigned int) { return true; }
 
-        void* detectedDevicePtr = nullptr;
-        bool ready = false;
+        std::atomic<void*> detectedDevicePtr{nullptr};
+        std::atomic<bool> ready{false};
     };
 }
 
 typedef void (*CreateSystemFn)(void* outSharedPtr, Pal::SystemDelegate*);
+typedef void (*SetDelegateFn)(void*, Pal::DeviceDelegate*);
+typedef uint32_t (*GetRateFn)(void*);
+typedef void (*SetRateFn)(void*, uint32_t);
 
-// Pal::Device virtual method helpers:
-// vtable[1] = void setDelegate(DeviceDelegate*)
-// vtable[8] = void setSampleRate(uint32_t)
-// vtable[9] = uint32_t getSampleRate()
+// Static/persistent instances to maintain driver connection throughout application lifecycle
+static Pal::SystemDelegate g_PalSysDelegate;
+static Pal::DeviceDelegate g_PalDevDelegate;
+static alignas(16) char g_PalSysStorage[64] = {0};
+static std::atomic<bool> g_PalInitialized{false};
+static std::atomic<bool> g_DelegateAttached{false};
 
-static void Device_SetDelegate(void* devPtr, Pal::DeviceDelegate* delegate) {
-    typedef void (*SetDelegateFn)(void*, Pal::DeviceDelegate*);
-    void** vtable = *(void***)devPtr;
-    ((SetDelegateFn)vtable[1])(devPtr, delegate);
-}
+bool InitializePal() {
+    if (g_PalInitialized) return true;
 
-static uint32_t Device_GetSampleRate(void* devPtr) {
-    typedef uint32_t (*GetRateFn)(void*);
-    void** vtable = *(void***)devPtr;
-    return ((GetRateFn)vtable[9])(devPtr);
-}
-
-static void Device_SetSampleRate(void* devPtr, uint32_t rate) {
-    typedef void (*SetRateFn)(void*, uint32_t);
-    void** vtable = *(void***)devPtr;
-    ((SetRateFn)vtable[8])(devPtr, rate);
-}
-
-bool ReclockViaFocusritePal() {
-    Log("ReclockViaFocusritePal: Loading FocusritePal64.dll from system...");
-
+    Log("InitializePal: Loading FocusritePal64.dll from system...");
     HMODULE hPal = LoadLibraryW(L"C:\\Windows\\System32\\FocusritePal64.dll");
     if (!hPal) {
         hPal = LoadLibraryW(L"FocusritePal64.dll");
     }
     if (!hPal) {
-        Log("ReclockViaFocusritePal: Failed to load FocusritePal64.dll (Error: %lu)", GetLastError());
+        Log("InitializePal: Failed to load FocusritePal64.dll (Error: %lu)", GetLastError());
         return false;
     }
 
     CreateSystemFn createSys = (CreateSystemFn)GetProcAddress(hPal, "?createSystem@System@Pal@@SA?AV?$shared_ptr@VSystem@Pal@@@std@@PEAVSystemDelegate@2@@Z");
     if (!createSys) {
-        Log("ReclockViaFocusritePal: Failed to find Pal::System::createSystem export");
+        Log("InitializePal: Failed to find Pal::System::createSystem export");
         return false;
     }
 
-    Pal::SystemDelegate sysDelegate;
-    Pal::DeviceDelegate devDelegate;
-    alignas(16) char sysStorage[64] = {0};
+    Log("InitializePal: Initializing persistent Pal::System via driver stack...");
+    createSys(g_PalSysStorage, &g_PalSysDelegate);
+    g_PalInitialized = true;
+    return true;
+}
 
-    Log("ReclockViaFocusritePal: Initializing Pal::System via driver stack...");
-    createSys(sysStorage, &sysDelegate);
+bool ReclockViaFocusritePal() {
+    if (!InitializePal()) {
+        return false;
+    }
 
-    // Wait up to 3000ms for device enumeration callback
+    // Wait up to 3000ms for device enumeration if not already cached
     auto deadline = GetTickCount64() + 3000;
-    while (!sysDelegate.ready && GetTickCount64() < deadline) {
+    while (!g_PalSysDelegate.ready && GetTickCount64() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    if (!sysDelegate.ready || !sysDelegate.detectedDevicePtr) {
+    if (!g_PalSysDelegate.ready || !g_PalSysDelegate.detectedDevicePtr) {
         Log("ReclockViaFocusritePal: No Scarlett device detected within timeout");
         return false;
     }
 
-    void* dev = sysDelegate.detectedDevicePtr;
-    Device_SetDelegate(dev, &devDelegate);
+    void* dev = g_PalSysDelegate.detectedDevicePtr;
+    void** vtable = *(void***)dev;
 
-    uint32_t currentRate = Device_GetSampleRate(dev);
+    // Attach device delegate once per device pointer
+    SetDelegateFn setDelegate = (SetDelegateFn)vtable[1];
+    setDelegate(dev, &g_PalDevDelegate);
+
+    GetRateFn getRate = (GetRateFn)vtable[9];
+    SetRateFn setRate = (SetRateFn)vtable[8];
+
+    uint32_t currentRate = getRate(dev);
     Log("ReclockViaFocusritePal: Current Hardware Sample Rate: %u Hz", currentRate);
 
     uint32_t targetRate = (currentRate == 44100) ? 48000 : 44100;
     if (currentRate == 0) targetRate = 48000;
 
     Log("ReclockViaFocusritePal: Flipping sample rate %u -> %u...", currentRate, targetRate);
-    Device_SetSampleRate(dev, targetRate);
+    setRate(dev, targetRate);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 
-    uint32_t midRate = Device_GetSampleRate(dev);
+    uint32_t midRate = getRate(dev);
     Log("ReclockViaFocusritePal: Interim Sample Rate: %u Hz", midRate);
 
     Log("ReclockViaFocusritePal: Flipping sample rate back %u -> %u...", targetRate, (currentRate == 0 ? 44100 : currentRate));
-    Device_SetSampleRate(dev, (currentRate == 0 ? 44100 : currentRate));
+    setRate(dev, (currentRate == 0 ? 44100 : currentRate));
 
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-    uint32_t finalRate = Device_GetSampleRate(dev);
+    uint32_t finalRate = getRate(dev);
     Log("ReclockViaFocusritePal: Final Sample Rate: %u Hz (PLL re-locked successfully)", finalRate);
 
     return true;
