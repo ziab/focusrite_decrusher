@@ -8,22 +8,7 @@
 #include "AudioReset.h"
 #include "PalReset.h"
 
-bool g_LoggingEnabled = false;
-
-void Log(const char* format, ...) {
-    if (!g_LoggingEnabled) return;
-    
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-    printf("[%02d:%02d:%02d.%03d] ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
-    
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    printf("\n");
-    va_end(args);
-    fflush(stdout);
-}
+#include "Diagnostics.h"
 
 #define WM_TRAYICON (WM_USER + 1)
 #define WM_DECRUSH_RESULT (WM_APP + 1)
@@ -85,9 +70,9 @@ void ShowContextMenu(HWND hwnd) {
     DestroyMenu(hMenu);
 }
 
-void PerformDecrush() {
-    std::thread([]() {
-        Log("PerformDecrush: Monitor off detected. Waiting 5 seconds...");
+void PerformDecrush(DWORD monitorState) {
+    std::thread([monitorState]() {
+        Log("PerformDecrush: Monitor %s detected. Waiting 5 seconds...", monitorState == 0 ? "off" : "on");
         Sleep(5000);
         Log("PerformDecrush: 5 seconds elapsed. Firing audio reset.");
         bool ok = ReclockFocusriteDevice();
@@ -111,10 +96,12 @@ void PerformManualDecrush() {
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    LogDiagnosticMessage(uMsg, wParam, lParam);
     switch (uMsg) {
         case WM_CREATE:
             Log("WindowProc: WM_CREATE received.");
             AddTrayIcon(hwnd);
+            StartDiagnostics(hwnd);
             InitializePal();
             hPowerNotify = RegisterPowerSettingNotification(hwnd, &GUID_MONITOR_POWER_ON, DEVICE_NOTIFY_WINDOW_HANDLE);
             if (hPowerNotify) {
@@ -131,7 +118,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     DWORD monitorState = *(DWORD*)pbs->Data;
                     Log("WindowProc: WM_POWERBROADCAST GUID_MONITOR_POWER_ON state=%u", monitorState);
                     if (monitorState == 0 || monitorState == 1) {
-                        PerformDecrush();
+                        PerformDecrush(monitorState);
                     }
                 }
             }
@@ -169,7 +156,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_COMMAND:
             if (LOWORD(wParam) == ID_TRAY_EXIT) {
                 Log("WindowProc: Exit selected from tray.");
-                PostQuitMessage(0);
+                DestroyWindow(hwnd);
             } else if (LOWORD(wParam) == ID_TRAY_MANUAL_DECRUSH) {
                 Log("WindowProc: Manual De-Crush selected from tray.");
                 PerformManualDecrush();
@@ -181,6 +168,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (hPowerNotify) {
                 UnregisterPowerSettingNotification(hPowerNotify);
             }
+            StopDiagnostics();
             RemoveTrayIcon();
             PostQuitMessage(0);
             break;
@@ -192,16 +180,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    if (strstr(lpCmdLine, "-logs") != NULL) {
-        g_LoggingEnabled = true;
-        AllocConsole();
-        FILE* fp;
-        freopen_s(&fp, "CONOUT$", "w", stdout);
-        freopen_s(&fp, "CONOUT$", "w", stderr);
-        SetConsoleTitle(L"De-Crusher Debug Logs");
-        Log("Logging enabled. Command line: %s", lpCmdLine);
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    bool console = false, diagnostics = false;
+    for (int i = 1; argv && i < argc; ++i) {
+        console |= wcscmp(argv[i], L"-logs") == 0;
+        diagnostics |= wcscmp(argv[i], L"-diagnostics") == 0;
     }
-
+    if (argv) LocalFree(argv);
+    if (!InitializeLogging(console, diagnostics)) {
+        MessageBoxW(nullptr, L"Could not open the diagnostic log in LocalAppData.", L"De-Crusher", MB_ICONERROR);
+        return 1;
+    }
     SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
     Log("WinMain: Process priority set to ABOVE_NORMAL_PRIORITY_CLASS.");
 
@@ -240,7 +230,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     Log("WinMain: Message loop exited. Closing app.");
-    if (g_LoggingEnabled) {
+    if (console) {
         FreeConsole();
     }
     return 0;

@@ -125,7 +125,7 @@ bool ReclockViaFocusritePal() {
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
     uint32_t finalRate = getRate(dev);
-    Log("ReclockViaFocusritePal: Final Sample Rate: %u Hz (PLL re-locked successfully)", finalRate);
+    Log("ReclockViaFocusritePal: Final Sample Rate: %u Hz (rate readback only; audio quality and PLL lock not verified)", finalRate);
 
     return true;
 }

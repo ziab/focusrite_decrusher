@@ -6,6 +6,7 @@ add_compile_definitions(UNICODE _UNICODE _WINSOCK_DEPRECATED_NO_WARNINGS NOMINMA
 
 add_executable(DeCrusher WIN32
     src/main.cpp
+    src/Diagnostics.cpp
     src/AudioReset.cpp
     src/AudioReset.h
     src/PalReset.cpp
@@ -31,5 +32,3 @@ target_link_libraries(DeCrusher PRIVATE
     cabinet
     crypt32
 )
-
-

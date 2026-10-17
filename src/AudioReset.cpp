@@ -8,13 +8,13 @@ bool ReclockFocusriteDevice() {
     Log("ReclockFocusriteDevice: Starting sample-rate flip 48<->44.1kHz (no driver restart)...");
 
     if (ReclockViaFocusritePal()) {
-        Log("ReclockFocusriteDevice: Driver PAL sample-rate flip succeeded (PLL re-locked)");
+        Log("ReclockFocusriteDevice: Driver PAL sample-rate flip succeeded (sequence completed)");
         return true;
     }
 
     Log("Driver PAL reset not available, falling back to direct USB FCP...");
     if (ReclockViaFcpSampleRate()) {
-        Log("ReclockFocusriteDevice: FCP sample-rate flip succeeded (direct USB, PLL re-locked)");
+        Log("ReclockFocusriteDevice: FCP sample-rate flip succeeded (direct USB sequence completed)");
         return true;
     }
 

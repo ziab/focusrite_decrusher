@@ -53,3 +53,44 @@ This project requires **CMake** and **Visual Studio / MSVC**.
 1. Clone the repository.
 2. Run `build.bat` (or `cmake --build build --config Release`).
 3. The compiled standalone executable is generated at `build\Release\DeCrusher.exe`.
+
+## 5. Opt-in incident diagnostics
+
+Exit the existing tray instance first, then launch `DeCrusher.exe -diagnostics`
+(add `-logs` if you also want a console). Normal runs do not open log files or
+register the extra device notifications. `-logs` alone remains console-only.
+Diagnostics append to `%LOCALAPPDATA%\DeCrusher\Diagnostics\events.log`, rotating
+at approximately 8 MiB into `events.log.1`. Lines include the local date/time,
+milliseconds since boot and thread ID. Device interface paths and power messages
+are recorded along with reset activity. These events do not trigger extra resets.
+Monitor on and off both trigger the existing five-second delayed reset.
+
+For deeper investigation, run these commands from **an elevated PowerShell** in
+the project directory. WPR collection is separate from the app and starts only
+when explicitly requested:
+
+```powershell
+.\trace.ps1 -Action Start
+.\trace.ps1 -Action Status
+# Immediately after hearing distortion:
+.\trace.ps1 -Action Save
+# Or discard the recording when no longer investigating:
+.\trace.ps1 -Action Cancel
+```
+
+The named `DeCrusherDiagnostics` WPR instance records GeneralProfile, Audio and
+Power in circular memory buffers. It captures recent performance activity for
+analysis in Windows Performance Analyzer, including CPU/DPC/ISR and I/O evidence.
+Retention depends on activity; save promptly, and note the time you first heard
+the problem and any recovery actions. Saving stops recording, creates a dated
+ETL, exports the previous hour of relevant Windows event logs, and copies the
+app logs into the same diagnostics directory. Start again to record another
+incident. The helper does not enable disabled Windows event-log channels.
+
+Tracing has overhead while enabled and continues if the app exits; explicitly
+Save or Cancel when finished. Saved incidents are not automatically deleted.
+Trace files can contain process names, paths and device identifiers. A rate
+readback or a completed reset is not proof that audio quality or PLL lock is good.
+
+WPR memory-mode and named-instance behavior:
+[Microsoft WPR command-line documentation](https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options).
